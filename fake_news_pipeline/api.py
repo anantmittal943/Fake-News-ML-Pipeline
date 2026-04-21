@@ -12,6 +12,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 from .constants import DEFAULT_MODEL_PATH
 from .transformers import SentinelToNaN
 
@@ -19,7 +22,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _state: dict[str, object] = {}
-
 
 def _register_legacy_pickling_shim() -> None:
     """Allow loading older joblib artifacts that reference __main__.SentinelToNaN."""
@@ -113,6 +115,15 @@ def create_app(model_path: Path = DEFAULT_MODEL_PATH) -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["*"],
     )
+
+    FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+ 
+    @app.get("/", include_in_schema=False)
+    def serve_ui():
+        return FileResponse(FRONTEND_DIR / "index.html")
+ 
+    if FRONTEND_DIR.exists():
+        app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 
     @app.get("/health", tags=["ops"])
     def health() -> dict[str, str]:

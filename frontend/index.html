@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Veritas — Fake News Detector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ─── TOKENS ───────────────────────────────────────────────── */
+    :root {
+      --bg:        #0C0E14;
+      --surface:   #13161F;
+      --surface2:  #1A1E2A;
+      --border:    #252A38;
+      --border2:   #2F3546;
+      --text:      #E8ECF4;
+      --muted:     #6B7491;
+      --muted2:    #4A5068;
+
+      --fake:      #FF5C57;
+      --fake-dim:  rgba(255,92,87,0.12);
+      --fake-glow: rgba(255,92,87,0.25);
+
+      --real:      #3DD68C;
+      --real-dim:  rgba(61,214,140,0.10);
+      --real-glow: rgba(61,214,140,0.20);
+
+      --accent:    #7B8BFF;
+      --accent-dim:rgba(123,139,255,0.12);
+
+      --font-head: 'Syne', sans-serif;
+      --font-mono: 'IBM Plex Mono', monospace;
+      --font-body: 'DM Sans', sans-serif;
+
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+
+    /* ─── RESET & BASE ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* subtle grid texture */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image:
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 40px 40px;
+      opacity: 0.18;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ─── LAYOUT ────────────────────────────────────────────────── */
+    .app { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 0 24px 80px; }
+
+    /* ─── HEADER ────────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 28px 0 32px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 36px;
+    }
+
+    .logo { display: flex; align-items: baseline; gap: 10px; }
+    .logo-mark {
+      font-family: var(--font-head);
+      font-size: 26px; font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .logo-sub {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    /* ─── API STATUS PILL ───────────────────────────────────────── */
+    #status-pill {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border2);
+      background: var(--surface);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      transition: all 0.3s;
+      cursor: default;
+    }
+    #status-pill .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted2);
+      transition: background 0.3s;
+    }
+    #status-pill.online  { border-color: var(--real);  color: var(--real);  }
+    #status-pill.online .dot  { background: var(--real);  box-shadow: 0 0 6px var(--real-glow); animation: pulse 2s infinite; }
+    #status-pill.offline { border-color: var(--fake); color: var(--fake); }
+    #status-pill.offline .dot { background: var(--fake); }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; } 50% { opacity: 0.4; }
+    }
+
+    /* ─── SECTION TITLES ────────────────────────────────────────── */
+    .section-header {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 20px;
+    }
+    .section-num {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 500;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      padding: 3px 8px;
+      background: var(--accent-dim);
+      border-radius: 4px;
+    }
+    .section-title {
+      font-family: var(--font-head);
+      font-size: 18px; font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.2px;
+    }
+
+    /* ─── CARDS ─────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 28px;
+      position: relative;
+      overflow: hidden;
+    }
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent-dim), transparent);
+    }
+
+    /* ─── SAMPLE PRESETS ────────────────────────────────────────── */
+    .presets-row {
+      display: flex; gap: 8px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .preset-btn {
+      font-family: var(--font-mono);
+      font-size: 11px; font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border2);
+      background: var(--surface2);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.04em;
+    }
+    .preset-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .preset-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+    /* ─── FORM GRID ─────────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    @media (max-width: 700px) { .form-grid { grid-template-columns: 1fr 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 6px; }
+
+    .field label {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 500;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .field-hint { font-size: 10px; color: var(--muted2); font-family: var(--font-mono); }
+
+    .field input, .field select {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      padding: 10px 12px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      width: 100%;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-dim);
+    }
+    .field input[type=range] {
+      padding: 6px 0; cursor: pointer;
+      accent-color: var(--accent);
+    }
+    .range-row { display: flex; align-items: center; gap: 10px; }
+    .range-val {
+      font-family: var(--font-mono);
+      font-size: 13px; color: var(--accent);
+      min-width: 32px; text-align: right;
+    }
+
+    /* ─── BUTTONS ───────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      font-family: var(--font-head);
+      font-size: 14px; font-weight: 600;
+      padding: 11px 24px;
+      border-radius: var(--radius-sm);
+      border: none; cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: -0.1px;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 0 0 var(--accent-dim);
+    }
+    .btn-primary:hover { background: #9aa8ff; box-shadow: 0 0 20px var(--accent-dim); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+    .btn-ghost {
+      background: var(--surface2);
+      border: 1px solid var(--border2);
+      color: var(--muted);
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* spinner inside button */
+    .btn .spinner {
+      width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: none;
+    }
+    .btn.loading .spinner { display: block; }
+    .btn.loading .btn-label { opacity: 0.6; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ─── RESULT CARD ───────────────────────────────────────────── */
+    #result-area { margin-top: 20px; }
+    .result-card {
+      border-radius: var(--radius);
+      border: 1px solid var(--border2);
+      padding: 20px 24px;
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .result-card.fake {
+      background: var(--fake-dim);
+      border-color: rgba(255,92,87,0.35);
+    }
+    .result-card.real {
+      background: var(--real-dim);
+      border-color: rgba(61,214,140,0.30);
+    }
+
+    .result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .verdict {
+      font-family: var(--font-head);
+      font-size: 22px; font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    .verdict.fake { color: var(--fake); }
+    .verdict.real { color: var(--real); }
+
+    .result-id {
+      font-family: var(--font-mono);
+      font-size: 11px; color: var(--muted);
+    }
+
+    /* probability bars */
+    .prob-bars { display: flex; flex-direction: column; gap: 10px; }
+    .prob-row { display: flex; align-items: center; gap: 12px; }
+    .prob-label {
+      font-family: var(--font-mono);
+      font-size: 11px; color: var(--muted);
+      min-width: 54px; text-align: right;
+      letter-spacing: 0.05em;
+    }
+    .prob-track {
+      flex: 1; height: 6px;
+      background: var(--border);
+      border-radius: 100px; overflow: hidden;
+    }
+    .prob-fill {
+      height: 100%; border-radius: 100px;
+      width: 0; transition: width 0.7s cubic-bezier(0.22,1,0.36,1);
+    }
+    .prob-fill.fake { background: var(--fake); box-shadow: 0 0 8px var(--fake-glow); }
+    .prob-fill.real { background: var(--real); box-shadow: 0 0 8px var(--real-glow); }
+    .prob-pct {
+      font-family: var(--font-mono);
+      font-size: 12px; font-weight: 500;
+      min-width: 42px;
+    }
+    .prob-pct.fake { color: var(--fake); }
+    .prob-pct.real { color: var(--real); }
+
+    .result-json-row { margin-top: 14px; display: flex; justify-content: flex-end; }
+    .copy-btn {
+      font-family: var(--font-mono);
+      font-size: 10px; color: var(--muted);
+      background: none; border: 1px solid var(--border2);
+      border-radius: 4px; padding: 4px 10px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .copy-btn:hover { color: var(--text); border-color: var(--muted); }
+
+    /* error state */
+    .result-error {
+      background: rgba(255,92,87,0.08);
+      border: 1px solid rgba(255,92,87,0.25);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--fake);
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+
+    /* ─── DIVIDER ───────────────────────────────────────────────── */
+    .divider {
+      height: 1px; background: var(--border);
+      margin: 36px 0;
+    }
+
+    /* ─── BATCH TABLE ───────────────────────────────────────────── */
+    .batch-table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      font-family: var(--font-mono);
+      font-size: 10px; font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.1em;
+      padding: 10px 14px;
+      text-align: left;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody td {
+      padding: 10px 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      border-bottom: 1px solid var(--border);
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: var(--surface2); }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px; border-radius: 100px;
+      font-size: 10px; font-family: var(--font-mono); font-weight: 500;
+      letter-spacing: 0.05em;
+    }
+    .badge-fake { background: var(--fake-dim); color: var(--fake); border: 1px solid rgba(255,92,87,0.3); }
+    .badge-real { background: var(--real-dim); color: var(--real); border: 1px solid rgba(61,214,140,0.25); }
+    .badge-pending { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(123,139,255,0.3); }
+
+    #batch-result-area { margin-top: 20px; }
+
+    /* mini prob bar inside table */
+    .mini-bar-wrap { display: flex; align-items: center; gap: 6px; }
+    .mini-bar { flex: 1; height: 4px; background: var(--border); border-radius: 100px; overflow: hidden; min-width: 60px; }
+    .mini-fill { height: 100%; border-radius: 100px; transition: width 0.7s cubic-bezier(0.22,1,0.36,1); }
+    .mini-fill.fake { background: var(--fake); }
+    .mini-fill.real { background: var(--real); }
+    .mini-pct { font-size: 11px; min-width: 36px; text-align: right; }
+    .mini-pct.fake { color: var(--fake); }
+    .mini-pct.real { color: var(--real); }
+
+    /* ─── FOOTER ────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 32px 0 0;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px; color: var(--muted2);
+      letter-spacing: 0.04em;
+    }
+    footer a { color: var(--muted); text-decoration: none; }
+    footer a:hover { color: var(--accent); }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- ─── HEADER ───────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <span class="logo-mark">Veritas</span>
+      <span class="logo-sub">Fake News Detector · v1.0</span>
+    </div>
+    <div id="status-pill" onclick="checkHealth()">
+      <span class="dot"></span>
+      <span id="status-text">checking…</span>
+    </div>
+  </header>
+
+
+  <!-- ─── SINGLE PREDICT ───────────────────────────────────────── -->
+  <section class="card">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <span class="section-title">Single Article Prediction</span>
+    </div>
+
+    <!-- Presets -->
+    <div class="presets-row">
+      <span style="font-family:var(--font-mono);font-size:11px;color:var(--muted);align-self:center;margin-right:4px;">PRESETS:</span>
+      <button class="preset-btn active" onclick="loadPreset('real')">✓ Likely Real</button>
+      <button class="preset-btn"        onclick="loadPreset('fake')">⚠ Likely Fake</button>
+      <button class="preset-btn"        onclick="loadPreset('ambiguous')">? Ambiguous</button>
+    </div>
+
+    <!-- Form -->
+    <form id="single-form" onsubmit="return false;">
+      <div class="form-grid">
+
+        <div class="field">
+          <label>Article ID</label>
+          <input type="number" id="f-id" value="1" min="1" />
+          <span class="field-hint">row identifier (not used by model)</span>
+        </div>
+
+        <div class="field">
+          <label>Year</label>
+          <select id="f-year">
+            <option value="2020">2020</option>
+            <option value="2021">2021</option>
+            <option value="2022">2022</option>
+            <option value="2023" selected>2023</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Word Count</label>
+          <input type="number" id="f-word-count" value="512" min="1" max="5000" />
+          <span class="field-hint">total words in article</span>
+        </div>
+
+        <div class="field">
+          <label>Caps Ratio <span class="field-hint" style="display:inline">(0.00 – 1.00)</span></label>
+          <div class="range-row">
+            <input type="range" id="f-caps-slider" min="0" max="0.13" step="0.01" value="0.07"
+                   oninput="document.getElementById('f-caps-ratio').value=parseFloat(this.value).toFixed(2);document.getElementById('f-caps-disp').textContent=parseFloat(this.value).toFixed(2);" />
+            <span class="range-val" id="f-caps-disp">0.07</span>
+          </div>
+          <input type="hidden" id="f-caps-ratio" value="0.07" />
+        </div>
+
+        <div class="field">
+          <label>Exclamation Count</label>
+          <input type="number" id="f-excl" value="4" min="0" max="100" />
+          <span class="field-hint">number of ! marks</span>
+        </div>
+
+        <div class="field">
+          <label>Source Credibility Rank</label>
+          <div class="range-row">
+            <input type="range" id="f-cred-slider" min="1" max="100" step="1" value="22"
+                   oninput="document.getElementById('f-cred').value=this.value;document.getElementById('f-cred-disp').textContent=this.value;" />
+            <span class="range-val" id="f-cred-disp">22</span>
+          </div>
+          <input type="hidden" id="f-cred" value="22" />
+        </div>
+
+      </div>
+
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button class="btn btn-primary" id="predict-btn" onclick="predictSingle()">
+          <div class="spinner"></div>
+          <span class="btn-label">Run Prediction</span>
+        </button>
+        <button class="btn btn-ghost" onclick="resetSingle()">Clear</button>
+      </div>
+    </form>
+
+    <!-- Result -->
+    <div id="result-area">
+      <div class="result-card" id="result-card">
+        <div class="result-header">
+          <div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--muted);margin-bottom:4px;letter-spacing:0.1em;">VERDICT</div>
+            <div class="verdict" id="res-verdict">—</div>
+          </div>
+          <div class="result-id" id="res-id">—</div>
+        </div>
+        <div class="prob-bars">
+          <div class="prob-row">
+            <span class="prob-label">REAL</span>
+            <div class="prob-track"><div class="prob-fill real" id="bar-real"></div></div>
+            <span class="prob-pct real" id="pct-real">—</span>
+          </div>
+          <div class="prob-row">
+            <span class="prob-label">FAKE</span>
+            <div class="prob-track"><div class="prob-fill fake" id="bar-fake"></div></div>
+            <span class="prob-pct fake" id="pct-fake">—</span>
+          </div>
+        </div>
+        <div class="result-json-row">
+          <button class="copy-btn" id="copy-json-btn" onclick="copyJSON()">{ } copy json</button>
+        </div>
+      </div>
+      <div class="result-error" id="result-error"></div>
+    </div>
+  </section>
+
+
+  <div class="divider"></div>
+
+
+  <!-- ─── BATCH PREDICT ─────────────────────────────────────────── -->
+  <section class="card">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <span class="section-title">Batch Prediction</span>
+    </div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;">
+      Five pre-loaded sample articles covering the full signal spectrum — run them all in one request.
+    </p>
+
+    <div class="batch-table-wrap">
+      <table id="batch-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Year</th>
+            <th>Words</th>
+            <th>Caps</th>
+            <th>Excl!</th>
+            <th>Cred. Rank</th>
+            <th>Expected</th>
+            <th>Prediction</th>
+            <th>P(fake)</th>
+          </tr>
+        </thead>
+        <tbody id="batch-tbody"></tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:20px;align-items:center;">
+      <button class="btn btn-primary" id="batch-btn" onclick="predictBatch()">
+        <div class="spinner"></div>
+        <span class="btn-label">Run Batch (5 articles)</span>
+      </button>
+      <span id="batch-status" style="font-family:var(--font-mono);font-size:11px;color:var(--muted);"></span>
+    </div>
+  </section>
+
+
+  <!-- ─── FOOTER ───────────────────────────────────────────────── -->
+  <footer>
+    <p>Veritas · Random Forest Classifier · macro-F1 0.97 · ROC-AUC 0.97</p>
+    <p style="margin-top:6px;">API: <a href="http://localhost:8000/docs" target="_blank">localhost:8000/docs</a> · <a href="http://localhost:8000/health" target="_blank">/health</a></p>
+  </footer>
+
+</div><!-- /.app -->
+
+
+<!-- ─── JAVASCRIPT ─────────────────────────────────────────────────────── -->
+<script>
+  const API = 'http://localhost:8000';
+  let lastResult = null;
+
+  /* ── Preset data ──────────────────────────────────────────────────── */
+  const PRESETS = {
+    real: {
+      id: 1, year: 2023, word_count: 612, caps_ratio: 0.03,
+      exclamation_count: 1, source_credibility_rank: 78,
+      _label: 'Likely Real'
+    },
+    fake: {
+      id: 2, year: 2022, word_count: 230, caps_ratio: 0.11,
+      exclamation_count: 5, source_credibility_rank: 4,
+      _label: 'Likely Fake'
+    },
+    ambiguous: {
+      id: 3, year: 2021, word_count: 450, caps_ratio: 0.05,
+      exclamation_count: 3, source_credibility_rank: 45,
+      _label: 'Ambiguous'
+    }
+  };
+
+  /* ── Batch samples ───────────────────────────────────────────────── */
+  const BATCH_SAMPLES = [
+    { id:10, year:2023, word_count:712, caps_ratio:0.02, exclamation_count:1, source_credibility_rank:82, expected:'Real'     },
+    { id:11, year:2020, word_count:189, caps_ratio:0.12, exclamation_count:5, source_credibility_rank:3,  expected:'Fake'     },
+    { id:12, year:2022, word_count:540, caps_ratio:0.06, exclamation_count:3, source_credibility_rank:55, expected:'Real'     },
+    { id:13, year:2021, word_count:162, caps_ratio:0.09, exclamation_count:4, source_credibility_rank:7,  expected:'Fake'     },
+    { id:14, year:2023, word_count:430, caps_ratio:0.05, exclamation_count:2, source_credibility_rank:48, expected:'Ambiguous'},
+  ];
+
+  /* ── Health check ─────────────────────────────────────────────────── */
+  async function checkHealth() {
+    const pill = document.getElementById('status-pill');
+    const text = document.getElementById('status-text');
+    pill.className = '';
+    text.textContent = 'checking…';
+    try {
+      const r = await fetch(`${API}/health`, { signal: AbortSignal.timeout(3000) });
+      if (r.ok) {
+        pill.classList.add('online');
+        text.textContent = 'API online';
+      } else { throw new Error(); }
+    } catch {
+      pill.classList.add('offline');
+      text.textContent = 'API offline';
+    }
+  }
+
+  /* ── Load preset ─────────────────────────────────────────────────── */
+  function loadPreset(key) {
+    const p = PRESETS[key];
+    document.getElementById('f-id').value         = p.id;
+    document.getElementById('f-year').value       = p.year;
+    document.getElementById('f-word-count').value = p.word_count;
+
+    const caps = p.caps_ratio;
+    document.getElementById('f-caps-slider').value = caps;
+    document.getElementById('f-caps-ratio').value  = caps.toFixed(2);
+    document.getElementById('f-caps-disp').textContent = caps.toFixed(2);
+
+    document.getElementById('f-excl').value = p.exclamation_count;
+
+    const cred = p.source_credibility_rank;
+    document.getElementById('f-cred-slider').value = cred;
+    document.getElementById('f-cred').value         = cred;
+    document.getElementById('f-cred-disp').textContent = cred;
+
+    document.querySelectorAll('.preset-btn').forEach((b,i) => {
+      b.classList.toggle('active', ['real','fake','ambiguous'][i] === key);
+    });
+
+    // clear old result
+    document.getElementById('result-card').style.display = 'none';
+    document.getElementById('result-error').style.display = 'none';
+  }
+
+  function resetSingle() {
+    loadPreset('real');
+  }
+
+  /* ── Build payload from form ─────────────────────────────────────── */
+  function buildPayload() {
+    return {
+      id:                     parseInt(document.getElementById('f-id').value),
+      year:                   parseInt(document.getElementById('f-year').value),
+      word_count:             parseInt(document.getElementById('f-word-count').value),
+      caps_ratio:             parseFloat(document.getElementById('f-caps-ratio').value),
+      exclamation_count:      parseInt(document.getElementById('f-excl').value),
+      source_credibility_rank:parseInt(document.getElementById('f-cred').value),
+    };
+  }
+
+  /* ── Single predict ──────────────────────────────────────────────── */
+  async function predictSingle() {
+    const btn = document.getElementById('predict-btn');
+    const card  = document.getElementById('result-card');
+    const errEl = document.getElementById('result-error');
+
+    card.style.display = 'none';
+    errEl.style.display = 'none';
+    btn.classList.add('loading');
+    btn.disabled = true;
+
+    try {
+      const payload = buildPayload();
+      const resp = await fetch(`${API}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(8000),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      lastResult = data;
+      showSingleResult(data);
+    } catch (e) {
+      errEl.textContent = `Error: ${e.message}`;
+      errEl.style.display = 'block';
+    } finally {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+    }
+  }
+
+  function showSingleResult(data) {
+    const card = document.getElementById('result-card');
+    const isFake = data.prediction === 1;
+
+    card.className = 'result-card ' + (isFake ? 'fake' : 'real');
+
+    document.getElementById('res-verdict').textContent  = data.label.toUpperCase();
+    document.getElementById('res-verdict').className    = 'verdict ' + (isFake ? 'fake' : 'real');
+    document.getElementById('res-id').textContent       = `id: ${data.id}`;
+
+    card.style.display = 'block';
+
+    // Animate bars (defer one frame so CSS transition fires)
+    requestAnimationFrame(() => {
+      const pf = Math.round(data.prob_fake * 100);
+      const pr = Math.round(data.prob_real * 100);
+      document.getElementById('bar-fake').style.width = pf + '%';
+      document.getElementById('bar-real').style.width = pr + '%';
+      document.getElementById('pct-fake').textContent = pf + '%';
+      document.getElementById('pct-real').textContent = pr + '%';
+    });
+  }
+
+  /* ── Copy JSON ───────────────────────────────────────────────────── */
+  function copyJSON() {
+    if (!lastResult) return;
+    navigator.clipboard.writeText(JSON.stringify(lastResult, null, 2));
+    const btn = document.getElementById('copy-json-btn');
+    btn.textContent = '✓ copied!';
+    setTimeout(() => { btn.textContent = '{ } copy json'; }, 1500);
+  }
+
+  /* ── Render batch table ──────────────────────────────────────────── */
+  function renderBatchTable(results = []) {
+    const tbody = document.getElementById('batch-tbody');
+    tbody.innerHTML = '';
+
+    BATCH_SAMPLES.forEach((s, i) => {
+      const res = results[i] || null;
+      const isFake = res ? res.prediction === 1 : null;
+      const pf = res ? Math.round(res.prob_fake * 100) : null;
+
+      const predCell = res
+        ? `<span class="badge ${isFake ? 'badge-fake' : 'badge-real'}">${res.label.toUpperCase()}</span>`
+        : `<span class="badge badge-pending">—</span>`;
+
+      const barCell = res
+        ? `<div class="mini-bar-wrap">
+             <div class="mini-bar"><div class="mini-fill ${isFake ? 'fake':'real'}" id="mbar-${i}" style="width:0%"></div></div>
+             <span class="mini-pct ${isFake ? 'fake':'real'}">${pf}%</span>
+           </div>`
+        : `<span style="font-family:var(--font-mono);color:var(--muted2);font-size:11px;">—</span>`;
+
+      const expectedBadge = s.expected === 'Real'
+        ? `<span class="badge badge-real">REAL</span>`
+        : s.expected === 'Fake'
+        ? `<span class="badge badge-fake">FAKE</span>`
+        : `<span class="badge badge-pending">?</span>`;
+
+      tbody.insertAdjacentHTML('beforeend', `
+        <tr>
+          <td>${s.id}</td>
+          <td>${s.year}</td>
+          <td>${s.word_count}</td>
+          <td>${s.caps_ratio.toFixed(2)}</td>
+          <td>${s.exclamation_count}</td>
+          <td>${s.source_credibility_rank}</td>
+          <td>${expectedBadge}</td>
+          <td>${predCell}</td>
+          <td>${barCell}</td>
+        </tr>
+      `);
+    });
+
+    // Animate mini bars after render
+    if (results.length) {
+      requestAnimationFrame(() => {
+        results.forEach((r, i) => {
+          const el = document.getElementById(`mbar-${i}`);
+          if (el) el.style.width = Math.round(r.prob_fake * 100) + '%';
+        });
+      });
+    }
+  }
+
+  /* ── Batch predict ───────────────────────────────────────────────── */
+  async function predictBatch() {
+    const btn    = document.getElementById('batch-btn');
+    const status = document.getElementById('batch-status');
+
+    btn.classList.add('loading');
+    btn.disabled = true;
+    status.textContent = '';
+
+    try {
+      const resp = await fetch(`${API}/predict_batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ articles: BATCH_SAMPLES }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      renderBatchTable(data.predictions);
+
+      const correct = data.predictions.filter((r, i) => {
+        const exp = BATCH_SAMPLES[i].expected;
+        return (r.prediction === 1 && exp === 'Fake') || (r.prediction === 0 && exp === 'Real');
+      }).length;
+      status.textContent = `${correct}/4 definitive articles predicted correctly`;
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.style.color = 'var(--fake)';
+    } finally {
+      btn.classList.remove('loading');
+      btn.disabled = false;
+    }
+  }
+
+  /* ── Init ────────────────────────────────────────────────────────── */
+  renderBatchTable();
+  checkHealth();
+  setInterval(checkHealth, 15000);
+</script>
+</body>
+</html>
